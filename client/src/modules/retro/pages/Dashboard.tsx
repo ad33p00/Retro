@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import * as api from "../lib/api";
-import { getBoardHistory, removeBoardFromHistory } from "../lib/boardHistory";
-import type { BoardState, TemplateDef } from "../lib/types";
+import type { BoardSummary, TemplateDef } from "../lib/types";
 
 const PAGE_SIZE = 8;
 const MINUTE = 60_000;
@@ -123,7 +122,7 @@ function LogoMark() {
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const [entries, setEntries] = useState<BoardState[] | null>(null);
+  const [entries, setEntries] = useState<BoardSummary[] | null>(null);
   const [templates, setTemplates] = useState<TemplateDef[]>([]);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -136,22 +135,8 @@ export function Dashboard() {
     let cancelled = false;
 
     async function load() {
-      const history = getBoardHistory();
-      const results = await Promise.all(
-        history.map(async (entry) => ({
-          id: entry.id,
-          visitedAt: entry.visitedAt,
-          state: await api.fetchBoardState(entry.id).catch(() => null),
-        }))
-      );
-      if (cancelled) return;
-
-      const valid: (BoardState & { visitedAt: number })[] = [];
-      for (const result of results) {
-        if (result.state) valid.push({ ...result.state, visitedAt: result.visitedAt });
-        else removeBoardFromHistory(result.id);
-      }
-      setEntries(valid);
+      const boards = await api.fetchBoards().catch(() => []);
+      if (!cancelled) setEntries(boards);
     }
 
     load();
@@ -162,16 +147,15 @@ export function Dashboard() {
 
   const rows = useMemo<Row[]>(() => {
     if (!entries) return [];
-    return (entries as (BoardState & { visitedAt?: number })[]).map((state) => {
-      const { board, cards, participants } = state;
+    return entries.map((board) => {
       const phase: Phase = board.completed_at ? "closed" : board.locked ? "voting" : "open";
-      const lastUpdated = board.completed_at ?? state.visitedAt ?? board.created_at;
+      const lastUpdated = board.completed_at ?? board.created_at;
       return {
         id: board.id,
         name: board.name,
         templateLabel: templates.find((t) => t.id === board.template)?.name ?? board.template,
-        teamSize: participants.length,
-        cardCount: cards.length,
+        teamSize: board.team_size,
+        cardCount: board.card_count,
         phase,
         lastUpdated,
       };
@@ -219,7 +203,7 @@ export function Dashboard() {
 
       {entries.length === 0 ? (
         <div className="dashboard-empty">
-          <p>You haven't created or joined any boards on this browser yet.</p>
+          <p>No retro boards yet.</p>
           <Link to="/retro/new" className="dashboard-link">
             Create your first board →
           </Link>

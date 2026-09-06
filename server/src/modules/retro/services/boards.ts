@@ -5,6 +5,7 @@ import {
   ActionItemRow,
   BoardRow,
   BoardState,
+  BoardSummaryRow,
   CardRow,
   ColumnRow,
   GroupRow,
@@ -69,6 +70,16 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardRow> {
 
 export async function getBoardRow(id: string): Promise<BoardRow | undefined> {
   return dbGet<BoardRow>(`SELECT * FROM boards WHERE id = ?`, [id]);
+}
+
+export async function listBoardSummaries(): Promise<BoardSummaryRow[]> {
+  return dbAll<BoardSummaryRow>(
+    `SELECT b.*,
+        (SELECT COUNT(*) FROM participants p WHERE p.board_id = b.id) as team_size,
+        (SELECT COUNT(*) FROM cards c JOIN columns col ON c.column_id = col.id WHERE col.board_id = b.id) as card_count
+     FROM boards b
+     ORDER BY b.created_at DESC`
+  );
 }
 
 export async function getBoardState(id: string): Promise<BoardState | undefined> {

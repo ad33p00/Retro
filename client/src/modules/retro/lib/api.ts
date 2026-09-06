@@ -1,8 +1,12 @@
 import { request, requestVoid } from "../../../lib/http";
-import type { ActionItem, Board, BoardState, Card, Group, Participant, SprintOption, TemplateDef, Vote } from "./types";
+import type { ActionItem, Board, BoardState, BoardSummary, Card, Group, Participant, SprintOption, TemplateDef, Vote } from "./types";
 
 export function fetchTemplates(): Promise<TemplateDef[]> {
   return request("/retro/boards/templates");
+}
+
+export function fetchBoards(): Promise<BoardSummary[]> {
+  return request("/retro/boards");
 }
 
 export interface CreateBoardInput {

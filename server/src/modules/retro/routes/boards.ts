@@ -23,6 +23,7 @@ import {
   getBoardState,
   getParticipant,
   joinBoard,
+  listBoardSummaries,
   setLocked,
   startTimer,
   stopTimer,
@@ -73,6 +74,15 @@ export function createBoardsRouter(io: Server): Router {
 
   boardsRouter.get("/templates", (_req, res) => {
     res.json(TEMPLATES);
+  });
+
+  boardsRouter.get("/", async (_req, res) => {
+    try {
+      const boards = await listBoardSummaries();
+      res.json(boards);
+    } catch (err) {
+      respondUnexpectedError(res, err);
+    }
   });
 
   boardsRouter.post("/", async (req, res) => {

@@ -9,7 +9,6 @@ import { ExportMenu } from "../components/ExportMenu";
 import { FacilitatorBar } from "../components/FacilitatorBar";
 import { NamePrompt } from "../components/NamePrompt";
 import { useBoardSocket } from "../hooks/useBoardSocket";
-import { recordBoardVisit } from "../lib/boardHistory";
 import { getStoredParticipantId, setStoredParticipantId } from "../lib/storage";
 import type { BoardState, Participant, SprintOption } from "../lib/types";
 
@@ -42,7 +41,6 @@ export function Board() {
       }
       if (cancelled) return;
       setBoard(boardState);
-      recordBoardVisit(boardState.board.id, boardState.board.name);
 
       const storedId = getStoredParticipantId(boardId!);
       if (storedId) {

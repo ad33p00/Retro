@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { createBoard, fetchTemplates } from "../lib/api";
-import { recordBoardVisit } from "../lib/boardHistory";
 import type { TemplateDef } from "../lib/types";
 
 export function CreateBoard() {
@@ -25,7 +24,6 @@ export function CreateBoard() {
     setSubmitting(true);
     try {
       const board = await createBoard({ name, template: templateId });
-      recordBoardVisit(board.id, board.name);
       navigate(`/retro/b/${board.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create board");

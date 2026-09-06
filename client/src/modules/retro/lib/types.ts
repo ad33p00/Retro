@@ -61,6 +61,11 @@ export interface Participant {
   is_facilitator: 0 | 1;
 }
 
+export interface BoardSummary extends Board {
+  team_size: number;
+  card_count: number;
+}
+
 export interface BoardState {
   board: Board;
   columns: Column[];
