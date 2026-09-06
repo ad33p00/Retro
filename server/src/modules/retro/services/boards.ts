@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { db } from "../../../../db/index.js";
+import { client, dbAll, dbGet, dbRun } from "../../../../db/index.js";
 import { listRetroSprints, publishRetroToClickUp } from "./clickupExport.js";
 import {
   ActionItemRow,
@@ -42,105 +42,91 @@ export interface CreateBoardInput {
   template: TemplateId;
 }
 
-export function createBoard(input: CreateBoardInput): BoardRow {
+export async function createBoard(input: CreateBoardInput): Promise<BoardRow> {
   const templateDef = TEMPLATES.find((t) => t.id === input.template);
   if (!templateDef) throw new Error(`Unknown template: ${input.template}`);
 
   const boardId = nanoid(10);
   const createdAt = Date.now();
 
-  const insertBoard = db.prepare(`
-    INSERT INTO boards (id, name, template, created_at, locked, pin_hash, timer_ends_at, completed_at)
-    VALUES (@id, @name, @template, @created_at, 0, NULL, NULL, NULL)
-  `);
-  const insertColumn = db.prepare(`
-    INSERT INTO columns (id, board_id, title, order_index) VALUES (?, ?, ?, ?)
-  `);
+  await client.batch(
+    [
+      {
+        sql: `INSERT INTO boards (id, name, template, created_at, locked, pin_hash, timer_ends_at, completed_at)
+              VALUES (?, ?, ?, ?, 0, NULL, NULL, NULL)`,
+        args: [boardId, input.name, input.template, createdAt],
+      },
+      ...templateDef.columns.map((title, i) => ({
+        sql: `INSERT INTO columns (id, board_id, title, order_index) VALUES (?, ?, ?, ?)`,
+        args: [nanoid(), boardId, title, i],
+      })),
+    ],
+    "write"
+  );
 
-  const tx = db.transaction(() => {
-    insertBoard.run({
-      id: boardId,
-      name: input.name,
-      template: input.template,
-      created_at: createdAt,
-    });
-    templateDef.columns.forEach((title, i) => {
-      insertColumn.run(nanoid(), boardId, title, i);
-    });
-  });
-  tx();
-
-  return getBoardRow(boardId)!;
+  return (await getBoardRow(boardId))!;
 }
 
-export function getBoardRow(id: string): BoardRow | undefined {
-  return db.prepare(`SELECT * FROM boards WHERE id = ?`).get(id) as BoardRow | undefined;
+export async function getBoardRow(id: string): Promise<BoardRow | undefined> {
+  return dbGet<BoardRow>(`SELECT * FROM boards WHERE id = ?`, [id]);
 }
 
-export function getBoardState(id: string): BoardState | undefined {
-  const board = getBoardRow(id);
+export async function getBoardState(id: string): Promise<BoardState | undefined> {
+  const board = await getBoardRow(id);
   if (!board) return undefined;
 
-  const columns = db
-    .prepare(`SELECT * FROM columns WHERE board_id = ? ORDER BY order_index`)
-    .all(id) as ColumnRow[];
+  const columns = await dbAll<ColumnRow>(`SELECT * FROM columns WHERE board_id = ? ORDER BY order_index`, [id]);
 
   const columnIds = columns.map((c) => c.id);
   const cards = columnIds.length
-    ? (db
-        .prepare(
-          `SELECT * FROM cards WHERE column_id IN (${columnIds.map(() => "?").join(",")}) ORDER BY created_at`
-        )
-        .all(...columnIds) as CardRow[])
+    ? await dbAll<CardRow>(
+        `SELECT * FROM cards WHERE column_id IN (${columnIds.map(() => "?").join(",")}) ORDER BY created_at`,
+        columnIds
+      )
     : [];
 
   const cardIds = cards.map((c) => c.id);
   const votes = cardIds.length
-    ? (db
-        .prepare(`SELECT * FROM votes WHERE card_id IN (${cardIds.map(() => "?").join(",")})`)
-        .all(...cardIds) as VoteRow[])
+    ? await dbAll<VoteRow>(`SELECT * FROM votes WHERE card_id IN (${cardIds.map(() => "?").join(",")})`, cardIds)
     : [];
 
-  const actionItems = db
-    .prepare(`SELECT * FROM action_items WHERE board_id = ?`)
-    .all(id) as ActionItemRow[];
-
-  const participants = db
-    .prepare(`SELECT * FROM participants WHERE board_id = ?`)
-    .all(id) as ParticipantRow[];
-
-  const groups = db.prepare(`SELECT * FROM groups WHERE board_id = ?`).all(id) as GroupRow[];
+  const actionItems = await dbAll<ActionItemRow>(`SELECT * FROM action_items WHERE board_id = ?`, [id]);
+  const participants = await dbAll<ParticipantRow>(`SELECT * FROM participants WHERE board_id = ?`, [id]);
+  const groups = await dbAll<GroupRow>(`SELECT * FROM groups WHERE board_id = ?`, [id]);
 
   return { board, columns, cards, groups, votes, actionItems, participants };
 }
 
-export function joinBoard(boardId: string, displayName: string | null): ParticipantRow {
-  const board = getBoardRow(boardId);
+export async function joinBoard(boardId: string, displayName: string | null): Promise<ParticipantRow> {
+  const board = await getBoardRow(boardId);
   if (!board) throw new Error("Board not found");
 
-  const { c: count } = db
-    .prepare(`SELECT COUNT(*) as c FROM participants WHERE board_id = ?`)
-    .get(boardId) as { c: number };
+  const countRow = await dbGet<{ c: number }>(`SELECT COUNT(*) as c FROM participants WHERE board_id = ?`, [
+    boardId,
+  ]);
+  const count = countRow?.c ?? 0;
 
   const id = nanoid();
   const color = PALETTE[count % PALETTE.length];
   const isFacilitator = count === 0 ? 1 : 0;
 
-  db.prepare(
-    `INSERT INTO participants (id, board_id, display_name, color, is_facilitator) VALUES (?, ?, ?, ?, ?)`
-  ).run(id, boardId, displayName, color, isFacilitator);
+  await dbRun(`INSERT INTO participants (id, board_id, display_name, color, is_facilitator) VALUES (?, ?, ?, ?, ?)`, [
+    id,
+    boardId,
+    displayName,
+    color,
+    isFacilitator,
+  ]);
 
-  return db.prepare(`SELECT * FROM participants WHERE id = ?`).get(id) as ParticipantRow;
+  return (await dbGet<ParticipantRow>(`SELECT * FROM participants WHERE id = ?`, [id]))!;
 }
 
-export function getParticipant(boardId: string, participantId: string): ParticipantRow | undefined {
-  return db
-    .prepare(`SELECT * FROM participants WHERE id = ? AND board_id = ?`)
-    .get(participantId, boardId) as ParticipantRow | undefined;
+export async function getParticipant(boardId: string, participantId: string): Promise<ParticipantRow | undefined> {
+  return dbGet<ParticipantRow>(`SELECT * FROM participants WHERE id = ? AND board_id = ?`, [participantId, boardId]);
 }
 
-function requireFacilitator(boardId: string, participantId: string): void {
-  const participant = getParticipant(boardId, participantId);
+async function requireFacilitator(boardId: string, participantId: string): Promise<void> {
+  const participant = await getParticipant(boardId, participantId);
   if (!participant) throw new BoardError(404, "participant not found");
   if (!participant.is_facilitator) throw new BoardError(403, "only the facilitator can do this");
 }
@@ -149,39 +135,43 @@ export function assertBoardOpen(board: BoardRow): void {
   if (board.completed_at) throw new BoardError(403, "this retro has been closed");
 }
 
-function requireOpenBoard(boardId: string): BoardRow {
-  const board = getBoardRow(boardId);
+async function requireOpenBoard(boardId: string): Promise<BoardRow> {
+  const board = await getBoardRow(boardId);
   if (!board) throw new BoardError(404, "board not found");
   assertBoardOpen(board);
   return board;
 }
 
-export function setLocked(boardId: string, participantId: string, locked: boolean): BoardRow {
-  requireFacilitator(boardId, participantId);
-  requireOpenBoard(boardId);
+export async function setLocked(boardId: string, participantId: string, locked: boolean): Promise<BoardRow> {
+  await requireFacilitator(boardId, participantId);
+  await requireOpenBoard(boardId);
 
-  db.prepare(`UPDATE boards SET locked = ? WHERE id = ?`).run(locked ? 1 : 0, boardId);
-  return getBoardRow(boardId)!;
+  await dbRun(`UPDATE boards SET locked = ? WHERE id = ?`, [locked ? 1 : 0, boardId]);
+  return (await getBoardRow(boardId))!;
 }
 
-export function startTimer(boardId: string, participantId: string, durationSeconds: number): BoardRow {
-  requireFacilitator(boardId, participantId);
-  requireOpenBoard(boardId);
+export async function startTimer(
+  boardId: string,
+  participantId: string,
+  durationSeconds: number
+): Promise<BoardRow> {
+  await requireFacilitator(boardId, participantId);
+  await requireOpenBoard(boardId);
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
     throw new BoardError(400, "durationSeconds must be a positive number");
   }
 
   const endsAt = Date.now() + Math.min(durationSeconds, MAX_TIMER_SECONDS) * 1000;
-  db.prepare(`UPDATE boards SET timer_ends_at = ? WHERE id = ?`).run(endsAt, boardId);
-  return getBoardRow(boardId)!;
+  await dbRun(`UPDATE boards SET timer_ends_at = ? WHERE id = ?`, [endsAt, boardId]);
+  return (await getBoardRow(boardId))!;
 }
 
-export function stopTimer(boardId: string, participantId: string): BoardRow {
-  requireFacilitator(boardId, participantId);
-  requireOpenBoard(boardId);
+export async function stopTimer(boardId: string, participantId: string): Promise<BoardRow> {
+  await requireFacilitator(boardId, participantId);
+  await requireOpenBoard(boardId);
 
-  db.prepare(`UPDATE boards SET timer_ends_at = NULL WHERE id = ?`).run(boardId);
-  return getBoardRow(boardId)!;
+  await dbRun(`UPDATE boards SET timer_ends_at = NULL WHERE id = ?`, [boardId]);
+  return (await getBoardRow(boardId))!;
 }
 
 export async function closeBoard(
@@ -189,8 +179,8 @@ export async function closeBoard(
   participantId: string,
   clickupListId?: string
 ): Promise<BoardRow> {
-  requireFacilitator(boardId, participantId);
-  const board = getBoardRow(boardId);
+  await requireFacilitator(boardId, participantId);
+  const board = await getBoardRow(boardId);
   if (!board) throw new BoardError(404, "board not found");
   if (board.completed_at) throw new BoardError(400, "this retro is already closed");
 
@@ -199,10 +189,10 @@ export async function closeBoard(
     throw new BoardError(400, "select a sprint to close this retro");
   }
 
-  db.prepare(`UPDATE boards SET completed_at = ? WHERE id = ?`).run(Date.now(), boardId);
-  const updated = getBoardRow(boardId)!;
+  await dbRun(`UPDATE boards SET completed_at = ? WHERE id = ?`, [Date.now(), boardId]);
+  const updated = (await getBoardRow(boardId))!;
 
-  const state = getBoardState(boardId);
+  const state = await getBoardState(boardId);
   if (state) void publishRetroToClickUp(state, clickupListId ? { id: clickupListId, type: 6 } : undefined);
 
   return updated;

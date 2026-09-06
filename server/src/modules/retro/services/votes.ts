@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { db } from "../../../../db/index.js";
+import { dbGet, dbRun } from "../../../../db/index.js";
 import { BoardRow, VoteRow } from "../types.js";
 import { getCardInBoard } from "./cards.js";
 import { getParticipant } from "./boards.js";
@@ -12,50 +12,52 @@ export class VoteError extends Error {
   }
 }
 
-function getBoard(boardId: string): BoardRow | undefined {
-  return db.prepare(`SELECT * FROM boards WHERE id = ?`).get(boardId) as BoardRow | undefined;
+async function getBoard(boardId: string): Promise<BoardRow | undefined> {
+  return dbGet<BoardRow>(`SELECT * FROM boards WHERE id = ?`, [boardId]);
 }
 
-function requireOpenBoard(boardId: string): BoardRow {
-  const board = getBoard(boardId);
+async function requireOpenBoard(boardId: string): Promise<BoardRow> {
+  const board = await getBoard(boardId);
   if (!board) throw new VoteError(404, "board not found");
   if (board.completed_at) throw new VoteError(403, "this retro has been closed");
   return board;
 }
 
-export function castVote(boardId: string, cardId: string, participantId: string): VoteRow {
-  requireOpenBoard(boardId);
+export async function castVote(boardId: string, cardId: string, participantId: string): Promise<VoteRow> {
+  await requireOpenBoard(boardId);
 
-  const card = getCardInBoard(cardId, boardId);
+  const card = await getCardInBoard(cardId, boardId);
   if (!card) throw new VoteError(404, "card not found");
 
-  const participant = getParticipant(boardId, participantId);
+  const participant = await getParticipant(boardId, participantId);
   if (!participant) throw new VoteError(404, "participant not found");
 
   if (card.author_participant_id === participantId) {
     throw new VoteError(403, "cannot vote on your own card");
   }
 
-  const existing = db
-    .prepare(`SELECT * FROM votes WHERE card_id = ? AND participant_id = ?`)
-    .get(cardId, participantId) as VoteRow | undefined;
+  const existing = await dbGet<VoteRow>(`SELECT * FROM votes WHERE card_id = ? AND participant_id = ?`, [
+    cardId,
+    participantId,
+  ]);
   if (existing) throw new VoteError(409, "already voted on this card");
 
   const id = nanoid();
-  db.prepare(`INSERT INTO votes (id, card_id, participant_id) VALUES (?, ?, ?)`).run(id, cardId, participantId);
-  return db.prepare(`SELECT * FROM votes WHERE id = ?`).get(id) as VoteRow;
+  await dbRun(`INSERT INTO votes (id, card_id, participant_id) VALUES (?, ?, ?)`, [id, cardId, participantId]);
+  return (await dbGet<VoteRow>(`SELECT * FROM votes WHERE id = ?`, [id]))!;
 }
 
-export function retractVote(boardId: string, cardId: string, participantId: string): VoteRow {
-  requireOpenBoard(boardId);
-  const card = getCardInBoard(cardId, boardId);
+export async function retractVote(boardId: string, cardId: string, participantId: string): Promise<VoteRow> {
+  await requireOpenBoard(boardId);
+  const card = await getCardInBoard(cardId, boardId);
   if (!card) throw new VoteError(404, "card not found");
 
-  const vote = db
-    .prepare(`SELECT * FROM votes WHERE card_id = ? AND participant_id = ? LIMIT 1`)
-    .get(cardId, participantId) as VoteRow | undefined;
+  const vote = await dbGet<VoteRow>(`SELECT * FROM votes WHERE card_id = ? AND participant_id = ? LIMIT 1`, [
+    cardId,
+    participantId,
+  ]);
   if (!vote) throw new VoteError(404, "no vote to retract");
 
-  db.prepare(`DELETE FROM votes WHERE id = ?`).run(vote.id);
+  await dbRun(`DELETE FROM votes WHERE id = ?`, [vote.id]);
   return vote;
 }

@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { db } from "../../../../db/index.js";
+import { dbGet, dbRun } from "../../../../db/index.js";
 import { ActionItemRow, BoardRow } from "../types.js";
 
 const MAX_TEXT_LENGTH = 280;
@@ -13,25 +13,27 @@ export class ActionItemError extends Error {
   }
 }
 
-function getBoard(boardId: string): BoardRow | undefined {
-  return db.prepare(`SELECT * FROM boards WHERE id = ?`).get(boardId) as BoardRow | undefined;
+async function getBoard(boardId: string): Promise<BoardRow | undefined> {
+  return dbGet<BoardRow>(`SELECT * FROM boards WHERE id = ?`, [boardId]);
 }
 
-function requireOpenBoard(boardId: string): BoardRow {
-  const board = getBoard(boardId);
+async function requireOpenBoard(boardId: string): Promise<BoardRow> {
+  const board = await getBoard(boardId);
   if (!board) throw new ActionItemError(404, "board not found");
   if (board.completed_at) throw new ActionItemError(403, "this retro has been closed");
   return board;
 }
 
-function getActionItem(boardId: string, itemId: string): ActionItemRow | undefined {
-  return db
-    .prepare(`SELECT * FROM action_items WHERE id = ? AND board_id = ?`)
-    .get(itemId, boardId) as ActionItemRow | undefined;
+async function getActionItem(boardId: string, itemId: string): Promise<ActionItemRow | undefined> {
+  return dbGet<ActionItemRow>(`SELECT * FROM action_items WHERE id = ? AND board_id = ?`, [itemId, boardId]);
 }
 
-export function addActionItem(boardId: string, text: string, assignee: string | null): ActionItemRow {
-  requireOpenBoard(boardId);
+export async function addActionItem(
+  boardId: string,
+  text: string,
+  assignee: string | null
+): Promise<ActionItemRow> {
+  await requireOpenBoard(boardId);
 
   const trimmedText = text.trim().slice(0, MAX_TEXT_LENGTH);
   if (!trimmedText) throw new ActionItemError(400, "text is required");
@@ -39,11 +41,14 @@ export function addActionItem(boardId: string, text: string, assignee: string | 
   const trimmedAssignee = assignee && assignee.trim() ? assignee.trim().slice(0, MAX_ASSIGNEE_LENGTH) : null;
 
   const id = nanoid();
-  db.prepare(
-    `INSERT INTO action_items (id, board_id, text, assignee, status) VALUES (?, ?, ?, ?, 'todo')`
-  ).run(id, boardId, trimmedText, trimmedAssignee);
+  await dbRun(`INSERT INTO action_items (id, board_id, text, assignee, status) VALUES (?, ?, ?, ?, 'todo')`, [
+    id,
+    boardId,
+    trimmedText,
+    trimmedAssignee,
+  ]);
 
-  return db.prepare(`SELECT * FROM action_items WHERE id = ?`).get(id) as ActionItemRow;
+  return (await dbGet<ActionItemRow>(`SELECT * FROM action_items WHERE id = ?`, [id]))!;
 }
 
 export interface ActionItemUpdate {
@@ -52,9 +57,13 @@ export interface ActionItemUpdate {
   status?: "todo" | "done";
 }
 
-export function updateActionItem(boardId: string, itemId: string, update: ActionItemUpdate): ActionItemRow {
-  requireOpenBoard(boardId);
-  const item = getActionItem(boardId, itemId);
+export async function updateActionItem(
+  boardId: string,
+  itemId: string,
+  update: ActionItemUpdate
+): Promise<ActionItemRow> {
+  await requireOpenBoard(boardId);
+  const item = await getActionItem(boardId, itemId);
   if (!item) throw new ActionItemError(404, "action item not found");
 
   const text = update.text !== undefined ? update.text.trim().slice(0, MAX_TEXT_LENGTH) : item.text;
@@ -70,20 +79,20 @@ export function updateActionItem(boardId: string, itemId: string, update: Action
   const status = update.status !== undefined ? update.status : item.status;
   if (status !== "todo" && status !== "done") throw new ActionItemError(400, "invalid status");
 
-  db.prepare(`UPDATE action_items SET text = ?, assignee = ?, status = ? WHERE id = ?`).run(
+  await dbRun(`UPDATE action_items SET text = ?, assignee = ?, status = ? WHERE id = ?`, [
     text,
     assignee,
     status,
-    itemId
-  );
+    itemId,
+  ]);
 
-  return db.prepare(`SELECT * FROM action_items WHERE id = ?`).get(itemId) as ActionItemRow;
+  return (await dbGet<ActionItemRow>(`SELECT * FROM action_items WHERE id = ?`, [itemId]))!;
 }
 
-export function deleteActionItem(boardId: string, itemId: string): void {
-  requireOpenBoard(boardId);
-  const item = getActionItem(boardId, itemId);
+export async function deleteActionItem(boardId: string, itemId: string): Promise<void> {
+  await requireOpenBoard(boardId);
+  const item = await getActionItem(boardId, itemId);
   if (!item) throw new ActionItemError(404, "action item not found");
 
-  db.prepare(`DELETE FROM action_items WHERE id = ?`).run(itemId);
+  await dbRun(`DELETE FROM action_items WHERE id = ?`, [itemId]);
 }

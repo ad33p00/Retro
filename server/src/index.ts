@@ -1,3 +1,5 @@
+import "./env.js";
+
 import cors from "cors";
 import express from "express";
 import fs from "node:fs";
@@ -5,15 +7,10 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
-
-try {
-  process.loadEnvFile();
-} catch {
-  // no .env file present — env vars may be supplied by the environment instead
-}
-
-import "../db/index.js";
+import { initDb } from "../db/index.js";
 import { registerRetroModule } from "./modules/retro/index.js";
+
+await initDb();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
