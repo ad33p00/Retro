@@ -52,7 +52,9 @@ export function Board() {
         }
       }
 
-      if (!cancelled) setStatus("needs-name");
+      if (cancelled) return;
+      // A closed retro is view-only for everyone, so skip the join prompt and let anyone browse it.
+      setStatus(boardState.board.completed_at ? "ready" : "needs-name");
     }
 
     load();
@@ -359,14 +361,6 @@ export function Board() {
     return <NamePrompt boardName={board.board.name} onSubmit={handleJoin} submitting={joining} />;
   }
 
-  if (!participant) {
-    return (
-      <div className="page">
-        <div className="loading-state">Loading board...</div>
-      </div>
-    );
-  }
-
   const isClosed = Boolean(board.board.completed_at);
 
   return (
@@ -380,10 +374,12 @@ export function Board() {
         </div>
         <div className="header-right">
           <ExportMenu boardId={board.board.id} />
-          <div className="participant-badge" style={{ backgroundColor: participant.color }}>
-            {participant.display_name}
-            {participant.is_facilitator ? " (Facilitator)" : ""}
-          </div>
+          {participant && (
+            <div className="participant-badge" style={{ backgroundColor: participant.color }}>
+              {participant.display_name}
+              {participant.is_facilitator ? " (Facilitator)" : ""}
+            </div>
+          )}
         </div>
       </header>
 
@@ -406,7 +402,7 @@ export function Board() {
 
       <FacilitatorBar
         board={board.board}
-        isFacilitator={Boolean(participant.is_facilitator)}
+        isFacilitator={Boolean(participant?.is_facilitator)}
         onToggleLock={handleToggleLock}
         onStartTimer={handleStartTimer}
         onStopTimer={handleStopTimer}
@@ -423,8 +419,8 @@ export function Board() {
               groups={board.groups}
               votes={board.votes}
               participantsById={participantsById}
-              currentParticipantId={participant.id}
-              isFacilitator={Boolean(participant.is_facilitator)}
+              currentParticipantId={participant?.id ?? ""}
+              isFacilitator={Boolean(participant?.is_facilitator)}
               locked={Boolean(board.board.locked)}
               readOnly={isClosed}
               onAdd={(text) => handleAdd(col.id, text)}
