@@ -1,6 +1,6 @@
 import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import * as api from "../lib/api";
 import { ActionItems } from "../components/ActionItems";
 import { CloseRetroModal } from "../components/CloseRetroModal";
@@ -374,7 +374,12 @@ export function Board() {
   return (
     <div className="page">
       <header className="board-header">
-        <h1>{board.board.name}</h1>
+        <div>
+          <Link to="/retro" className="dashboard-link" style={{ display: "block", marginBottom: 4 }}>
+            ← Back to dashboard
+          </Link>
+          <h1>{board.board.name}</h1>
+        </div>
         <div className="header-right">
           <ExportMenu boardId={board.board.id} />
           <div className="participant-badge" style={{ backgroundColor: participant.color }}>
